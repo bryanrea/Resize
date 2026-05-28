@@ -1,7 +1,7 @@
 const HISTORY_LIMIT = 20;
 const HISTORY_KEY = (windowId) => `history_${windowId}`;
 const ANIMATION_MS = 320;
-const ANIMATION_STEPS = 20;
+const ANIMATION_STEPS = 10;
 const MIN_STEP_MS = 16;
 const SIZE_TOLERANCE = 3;
 
@@ -43,7 +43,7 @@ async function ensureWindowSize(windowId, width, height) {
   }
 }
 
-async function animateResize(windowId, target, snapshot) {
+async function animateResize(windowId, target, snapshot, reducedMotion = false) {
   if (activeResizes.has(windowId)) {
     return { ok: false, error: "busy" };
   }
@@ -58,10 +58,15 @@ async function animateResize(windowId, target, snapshot) {
       win = await chrome.windows.get(windowId);
     }
 
-    const startW = win.width;
-    const startH = win.height;
     const endW = target.width;
     const endH = target.height;
+
+    if (reducedMotion) {
+      return await ensureWindowSize(windowId, endW, endH);
+    }
+
+    const startW = win.width;
+    const startH = win.height;
     const startTime = Date.now();
     let lastW = startW;
     let lastH = startH;
@@ -192,7 +197,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const result = await animateResize(
           message.windowId,
           message.target,
-          message.snapshot
+          message.snapshot,
+          message.reducedMotion
         );
         sendResponse(result);
       }
