@@ -66,7 +66,7 @@ async function loadRecentCustom() {
 }
 
 function saveRecentCustom() {
-  chrome.storage.session
+  return chrome.storage.session
     .set({ [RECENT_KEY]: state.recentCustom })
     .catch(() => {});
 }
@@ -175,6 +175,8 @@ async function applyResize(resolveTarget, label) {
       windowId: state.windowId,
       target,
       snapshot,
+      reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)")
+        .matches,
     });
 
     await refreshWindow();
@@ -203,7 +205,7 @@ async function resizeToPreset(preset) {
 
 async function resizeToCustom(w, h) {
   state.recentCustom = { w, h };
-  saveRecentCustom();
+  await saveRecentCustom();
   const label = `Custom · ${w} × ${h}`;
   await applyResize(
     () =>
@@ -229,12 +231,12 @@ function pulseStatusBar() {
     setTimeout(() => {
       els.statusBar.classList.remove("filling");
       els.statusBar.classList.add("fading");
-    }, 320)
+    }, 280)
   );
   statusTimers.push(
     setTimeout(() => {
       els.statusBar.classList.remove("fading");
-    }, 640)
+    }, 560)
   );
 }
 
