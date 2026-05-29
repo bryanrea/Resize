@@ -34,6 +34,7 @@ const els = {
   customW: null,
   customH: null,
   statusBar: $("#status-bar"),
+  stamp: $("#stamp"),
 };
 
 const state = {
@@ -218,6 +219,12 @@ async function resizeToCustom(w, h) {
 }
 
 // -------- Status / stamp -----------------------------------------------------
+
+function setVersionStamp() {
+  if (!els.stamp) return;
+  const [major, minor] = chrome.runtime.getManifest().version.split(".");
+  els.stamp.textContent = `v ${major}.${minor} / 1`;
+}
 
 let statusTimers = [];
 function pulseStatusBar() {
@@ -524,6 +531,7 @@ function wireEvents() {
 // -------- Init ---------------------------------------------------------------
 
 async function init() {
+  setVersionStamp();
   try {
     await refreshWindow();
     await Promise.all([measureViewportOffsets(), loadRecentCustom()]);

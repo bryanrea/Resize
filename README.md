@@ -9,7 +9,7 @@ A small, fast Chrome extension for resizing your browser window to common device
 - **Custom W×H** — type any size at the bottom.
 - **Search by name or dimension** — type `ipad`, `1920`, or `1920x1080`.
 - **Keyboard navigation** — ↑↓ to move, Enter to apply, Esc to clear search.
-- **Smooth eased animation** — `requestAnimationFrame` + ease-out cubic, no jitter.
+- **Smooth eased animation** — time-based ease-out cubic, no jitter.
 - **Undo / Redo via keyboard** — per-window history stack (up to 20), bound by you in `chrome://extensions/shortcuts`.
 - **Active size highlighted** — the popup shows which preset (if any) the current window matches.
 - **Handles maximized windows** — automatically un-maximizes before resizing.
