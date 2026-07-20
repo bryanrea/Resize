@@ -6,6 +6,9 @@ const ANIMATION_MS = 280;
 // that each actually land reads smoother than a flood the OS coalesces away.
 const FRAME_MIN_MS = 24;
 const SIZE_TOLERANCE = 3;
+const STATE_POLL_MS = 50;
+// Exiting a macOS fullscreen space is a long animated transition.
+const FULLSCREEN_SETTLE_TIMEOUT_MS = 1500;
 
 const activeResizes = new Set();
 
@@ -59,6 +62,34 @@ async function settleWindowSize(windowId, width, height) {
   }
 }
 
+// Wait until a state change has actually landed: state is "normal" and bounds
+// (including origin) are identical across two consecutive polls. macOS applies
+// the fullscreen exit asynchronously, well after the update call resolves;
+// animating before quiescence lets the late-landing restore fight the
+// animation. On timeout, return the latest read and proceed — worst case the
+// animation starts from wherever the window is, never a hang.
+async function waitForNormalBounds(windowId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let prev = null;
+  let win = await chrome.windows.get(windowId);
+  while (Date.now() < deadline) {
+    if (
+      win.state === "normal" &&
+      prev &&
+      prev.width === win.width &&
+      prev.height === win.height &&
+      prev.left === win.left &&
+      prev.top === win.top
+    ) {
+      return win;
+    }
+    prev = win;
+    await sleep(STATE_POLL_MS);
+    win = await chrome.windows.get(windowId);
+  }
+  return win;
+}
+
 async function animateResize(windowId, target, snapshot, reducedMotion = false) {
   if (activeResizes.has(windowId)) {
     return { ok: false, error: "busy" };
@@ -68,20 +99,17 @@ async function animateResize(windowId, target, snapshot, reducedMotion = false) 
     await pushHistory(windowId, snapshot);
 
     let win = await chrome.windows.get(windowId);
-    if (win.state !== "normal") {
-      // Leaving a maximized/zoomed window with {state:"normal"} alone makes
-      // macOS first restore it to its smaller pre-zoom frame — a visible
-      // shrink before the resize even begins. Pin it to its current on-screen
-      // size in the same call (size is honored for the "normal" state) so it
-      // becomes a normal window without jumping, then animate from there.
-      await updateWindow(windowId, {
-        state: "normal",
-        width: win.width,
-        height: win.height,
-      });
-      await sleep(80);
-      win = await chrome.windows.get(windowId);
+    if (win.state === "fullscreen") {
+      // Bounds updates are ignored while in a macOS fullscreen space, so exit
+      // first and wait out the space transition before animating.
+      await updateWindow(windowId, { state: "normal" });
+      win = await waitForNormalBounds(windowId, FULLSCREEN_SETTLE_TIMEOUT_MS);
     }
+    // A maximized/zoomed window needs no state handling at all: the first
+    // bounds update implicitly returns it to "normal" at exactly the size we
+    // ask for, in place. Explicitly setting {state:"normal"} instead invites
+    // macOS's asynchronous un-zoom restore, which lands late and fights the
+    // animation (the size→full→size bounce).
 
     const endW = target.width;
     const endH = target.height;
@@ -162,8 +190,9 @@ async function snapshotWindow(windowId) {
 async function applySnapshot(windowId, snapshot) {
   try {
     const current = await chrome.windows.get(windowId);
-    if (current.state !== "normal") {
-      await chrome.windows.update(windowId, { state: "normal" });
+    if (current.state === "fullscreen") {
+      await updateWindow(windowId, { state: "normal" });
+      await waitForNormalBounds(windowId, FULLSCREEN_SETTLE_TIMEOUT_MS);
     }
   } catch (e) {
     return;
