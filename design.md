@@ -14,7 +14,7 @@ The whole popup is 360px wide. Every decision below exists to keep that 360px fe
 4. **Latin grid.** Strict left edge (20px gutter), tabular numerics, asymmetric vertical rhythm. Text aligns to baselines; numbers align to columns.
 5. **Helvetica or nothing close to it.** Display in `Helvetica Now Display`, body in `Helvetica Now Text`, both with kerning + stylistic alternates enabled.
 6. **No defaults shouting.** Hover and selected states are reserved for explicit user intent. Nothing is highlighted just because the popup opened.
-7. **Silent fallbacks.** If a resize can't fully apply (e.g. window larger than screen), let it clamp silently. Don't apologize.
+7. **Silent fallbacks, honest numbers.** If a resize can't fully apply (e.g. window larger than screen), let it clamp without an error or apology. The toast states the size you actually got.
 
 ---
 
@@ -49,7 +49,7 @@ Dark mode flips bg/fg and steps the neutral scale; the accent shifts to `#ff3b30
 - `--fg` is for primary content (device names, wordmark).
 - `--muted` is for secondary content (dimensions, stamp, group labels).
 - `--neutral-300` is for the lightest dim — section separators, input underlines, the `×` between dimensions.
-- `--accent` only appears in: the brand mark (popup + extension icon), the index number on each preset row, the selection state, the search caret, the status bar, and the toast error/glyph.
+- `--accent` only appears in: the brand mark (popup + extension icon), the index number on each preset row, the selection state, the custom input caret and focus underline, the status bar, and the toast error.
 - Never tint a hover state in red. Hover is `--hover` (neutral grey). Red is for *intent*, not proximity.
 
 ---
@@ -142,7 +142,7 @@ The sticky group headers also paint a hairline as `inset 0 -1px 0 var(--rule)` �
 - The brand mark is the same two-rectangle composition as the extension icon, rendered as inline SVG at **24×24px** with `margin-right: 12px`. Same red (`#e30613`), same proportions, same geometry. The shapes are tuned to occupy most of the canvas, so the mark holds presence at both 24px (wordmark) and 16px (toolbar).
 - The 4px stroke uses `currentColor`, and the `.brand-mark` element's `color` is set to `var(--bg)`. This makes the separator between the two rectangles automatically pick up the popup background — white in light mode, near-black in dark mode — so the mark reads cleanly on either theme without shipping two variants.
 - Static. The mark is the *brand*, not a status indicator. Match status is communicated solely by the red left-bar on the matched preset row.
-- No `®`, no tagline, no version subtitle. The stamp `.1 / 1` floats on the right baseline as a quiet system tag.
+- No `®`, no tagline, no version subtitle. The stamp (`v 0.6 / 1`, built from the manifest version) floats on the right baseline as a quiet system tag.
 
 ### Group headers (sticky, frosted)
 
@@ -293,7 +293,7 @@ There is none. The only graphic in the UI is the brand mark (two red rectangles)
 ## Voice
 
 - Labels are nouns. **MOBILE**, **CUSTOM**, **SET** (when it existed) — never sentences.
-- Toasts read like `device name · W × H`. The middle dot is a `·` (U+00B7), not a hyphen.
+- Toasts read like `device name · W × H`, with W × H being the size reached. The middle dot is a `·` (U+00B7), not a hyphen.
 - No micro-copy. No "Choose a preset". No "Done!". The product *is* the action.
 
 ---

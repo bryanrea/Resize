@@ -90,67 +90,82 @@ async function waitForNormalBounds(windowId, timeoutMs) {
   return win;
 }
 
+async function performResize(windowId, target, reducedMotion) {
+  let win = await chrome.windows.get(windowId);
+  if (win.state === "fullscreen") {
+    // Bounds updates are ignored while in a macOS fullscreen space, so exit
+    // first and wait out the space transition before animating.
+    await updateWindow(windowId, { state: "normal" });
+    win = await waitForNormalBounds(windowId, FULLSCREEN_SETTLE_TIMEOUT_MS);
+  }
+  // A maximized/zoomed window needs no state handling at all: the first
+  // bounds update implicitly returns it to "normal" at exactly the size we
+  // ask for, in place. Explicitly setting {state:"normal"} instead invites
+  // macOS's asynchronous un-zoom restore, which lands late and fights the
+  // animation (the size→full→size bounce).
+
+  const endW = target.width;
+  const endH = target.height;
+
+  if (reducedMotion) {
+    return await settleWindowSize(windowId, endW, endH);
+  }
+
+  const startW = win.width;
+  const startH = win.height;
+
+  if (startW === endW && startH === endH) {
+    return { ok: true, width: startW, height: startH };
+  }
+
+  // Eased position is driven by the wall clock (so width and height always
+  // move off the same progress value — they can't desync), and each frame is
+  // AWAITED so the window manager finishes one resize before the next is
+  // requested. Awaiting is what keeps it smooth: firing faster than the OS
+  // can resize just gets coalesced into choppy jumps. The awaited round-trip
+  // plus the frame floor settles into a handful of clean frames over 280ms.
+  const startTime = Date.now();
+  let lastW = startW;
+  let lastH = startH;
+  let t = 0;
+  while (t < 1) {
+    t = Math.min(1, (Date.now() - startTime) / ANIMATION_MS);
+    const eased = easeOutCubic(t);
+    const w = Math.round(startW + (endW - startW) * eased);
+    const h = Math.round(startH + (endH - startH) * eased);
+    if (w !== lastW || h !== lastH) {
+      await updateWindow(windowId, { width: w, height: h });
+      lastW = w;
+      lastH = h;
+    }
+    if (t < 1) await sleep(FRAME_MIN_MS);
+  }
+
+  // Settle lands the exact target and reports the size the OS actually
+  // granted (it accepts an OS clamp instead of fighting it).
+  return await settleWindowSize(windowId, endW, endH);
+}
+
+// Compare the real outcome rather than the request: re-applying the current
+// size, or a preset the OS clamps to where the window already is, changes
+// nothing and must not add an undo step or clear redo.
+async function recordHistoryIfChanged(windowId, before) {
+  const after = await snapshotWindow(windowId);
+  const changed = ["width", "height", "left", "top", "state"].some(
+    (key) => before[key] !== after[key]
+  );
+  if (changed) await pushHistory(windowId, before);
+}
+
 async function animateResize(windowId, target, snapshot, reducedMotion = false) {
   if (activeResizes.has(windowId)) {
     return { ok: false, error: "busy" };
   }
   activeResizes.add(windowId);
   try {
-    await pushHistory(windowId, snapshot);
-
-    let win = await chrome.windows.get(windowId);
-    if (win.state === "fullscreen") {
-      // Bounds updates are ignored while in a macOS fullscreen space, so exit
-      // first and wait out the space transition before animating.
-      await updateWindow(windowId, { state: "normal" });
-      win = await waitForNormalBounds(windowId, FULLSCREEN_SETTLE_TIMEOUT_MS);
-    }
-    // A maximized/zoomed window needs no state handling at all: the first
-    // bounds update implicitly returns it to "normal" at exactly the size we
-    // ask for, in place. Explicitly setting {state:"normal"} instead invites
-    // macOS's asynchronous un-zoom restore, which lands late and fights the
-    // animation (the size→full→size bounce).
-
-    const endW = target.width;
-    const endH = target.height;
-
-    if (reducedMotion) {
-      return await settleWindowSize(windowId, endW, endH);
-    }
-
-    const startW = win.width;
-    const startH = win.height;
-
-    if (startW === endW && startH === endH) {
-      return { ok: true, width: startW, height: startH };
-    }
-
-    // Eased position is driven by the wall clock (so width and height always
-    // move off the same progress value — they can't desync), and each frame is
-    // AWAITED so the window manager finishes one resize before the next is
-    // requested. Awaiting is what keeps it smooth: firing faster than the OS
-    // can resize just gets coalesced into choppy jumps. The awaited round-trip
-    // plus the frame floor settles into a handful of clean frames over 280ms.
-    const startTime = Date.now();
-    let lastW = startW;
-    let lastH = startH;
-    let t = 0;
-    while (t < 1) {
-      t = Math.min(1, (Date.now() - startTime) / ANIMATION_MS);
-      const eased = easeOutCubic(t);
-      const w = Math.round(startW + (endW - startW) * eased);
-      const h = Math.round(startH + (endH - startH) * eased);
-      if (w !== lastW || h !== lastH) {
-        await updateWindow(windowId, { width: w, height: h });
-        lastW = w;
-        lastH = h;
-      }
-      if (t < 1) await sleep(FRAME_MIN_MS);
-    }
-
-    // Settle lands the exact target and reports the size the OS actually
-    // granted (it accepts an OS clamp instead of fighting it).
-    return await settleWindowSize(windowId, endW, endH);
+    const result = await performResize(windowId, target, reducedMotion);
+    await recordHistoryIfChanged(windowId, snapshot);
+    return result;
   } catch (e) {
     return { ok: false, error: String(e) };
   } finally {
