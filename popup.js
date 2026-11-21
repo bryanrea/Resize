@@ -41,6 +41,7 @@ const state = {
   windowId: null,
   current: { width: 0, height: 0 },
   chromeOffsets: { dx: 0, dy: 0 },
+  zoom: 1,
   selectedIndex: 0,
   visibleList: [],
   busy: false,
@@ -96,9 +97,13 @@ async function measureViewportOffsets() {
       }),
     });
     if (result) {
+      // innerWidth/innerHeight are CSS pixels, which shrink as page zoom grows;
+      // window bounds are not. Scale by zoom before comparing the two.
+      const zoom = await chrome.tabs.getZoom(tab.id);
+      state.zoom = zoom;
       state.chromeOffsets = {
-        dx: Math.max(0, state.current.width - result.iw),
-        dy: Math.max(0, state.current.height - result.ih),
+        dx: Math.max(0, state.current.width - Math.round(result.iw * zoom)),
+        dy: Math.max(0, state.current.height - Math.round(result.ih * zoom)),
       };
     }
   } catch (e) {
@@ -108,11 +113,12 @@ async function measureViewportOffsets() {
 
 // -------- Math ---------------------------------------------------------------
 
-function targetWindowSize(p) {
-  return clampToScreen({
-    width: p.w + state.chromeOffsets.dx,
-    height: p.h + state.chromeOffsets.dy,
-  });
+// The outer window size that gives the page a w × h viewport.
+function windowSizeFor(w, h) {
+  return {
+    width: Math.round(w * state.zoom) + state.chromeOffsets.dx,
+    height: Math.round(h * state.zoom) + state.chromeOffsets.dy,
+  };
 }
 
 function clampToScreen({ width, height }) {
@@ -122,29 +128,34 @@ function clampToScreen({ width, height }) {
   };
 }
 
-function findMatchedPreset() {
-  for (const p of PRESETS) {
-    const t = targetWindowSize(p);
-    if (
-      Math.abs(t.width - state.current.width) <= MATCH_TOLERANCE &&
-      Math.abs(t.height - state.current.height) <= MATCH_TOLERANCE
-    ) {
-      return p;
-    }
-  }
-  return null;
-}
-
-function isCustomCurrent() {
-  if (!state.recentCustom) return false;
-  const t = clampToScreen({
-    width: state.recentCustom.w + state.chromeOffsets.dx,
-    height: state.recentCustom.h + state.chromeOffsets.dy,
-  });
+// Deliberately unclamped: a window clamped to the screen is not actually 4K,
+// so it must not read as matching the 4K preset.
+function matchesCurrent(w, h) {
+  const t = windowSizeFor(w, h);
   return (
     Math.abs(t.width - state.current.width) <= MATCH_TOLERANCE &&
     Math.abs(t.height - state.current.height) <= MATCH_TOLERANCE
   );
+}
+
+function findMatchedPreset() {
+  return PRESETS.find((p) => matchesCurrent(p.w, p.h)) || null;
+}
+
+function isCustomCurrent() {
+  if (!state.recentCustom) return false;
+  return matchesCurrent(state.recentCustom.w, state.recentCustom.h);
+}
+
+// Label the size the window actually reached. Within tolerance the requested
+// numbers are shown, so rounding never makes an exact resize look off by one.
+function resultLabel(name, w, h) {
+  const { dx, dy } = state.chromeOffsets;
+  const actualW = Math.round((state.current.width - dx) / state.zoom);
+  const actualH = Math.round((state.current.height - dy) / state.zoom);
+  const shownW = Math.abs(actualW - w) <= MATCH_TOLERANCE ? w : actualW;
+  const shownH = Math.abs(actualH - h) <= MATCH_TOLERANCE ? h : actualH;
+  return `${name} · ${shownW} × ${shownH}`;
 }
 
 // -------- Resize -------------------------------------------------------------
@@ -154,13 +165,13 @@ async function prepareForResize() {
   await measureViewportOffsets();
 }
 
-async function applyResize(resolveTarget, label) {
+async function applyResize(name, w, h) {
   if (state.busy) return;
   state.busy = true;
   pulseStatusBar();
   try {
     await prepareForResize();
-    const target = resolveTarget();
+    const target = clampToScreen(windowSizeFor(w, h));
 
     let win = await chrome.windows.get(state.windowId);
     const snapshot = {
@@ -186,7 +197,7 @@ async function applyResize(resolveTarget, label) {
         width: result.width ?? target.width,
         height: result.height ?? target.height,
       };
-      showToast(label);
+      showToast(resultLabel(name, w, h));
       renderPresets();
     } else {
       showToast("Resize failed", { error: true });
@@ -200,22 +211,13 @@ async function applyResize(resolveTarget, label) {
 }
 
 async function resizeToPreset(preset) {
-  const label = `${preset.name} · ${preset.w} × ${preset.h}`;
-  await applyResize(() => targetWindowSize(preset), label);
+  await applyResize(preset.name, preset.w, preset.h);
 }
 
 async function resizeToCustom(w, h) {
   state.recentCustom = { w, h };
   await saveRecentCustom();
-  const label = `Custom · ${w} × ${h}`;
-  await applyResize(
-    () =>
-      clampToScreen({
-        width: w + state.chromeOffsets.dx,
-        height: h + state.chromeOffsets.dy,
-      }),
-    label
-  );
+  await applyResize("Custom", w, h);
 }
 
 // -------- Status / stamp -----------------------------------------------------
